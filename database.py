@@ -33,6 +33,26 @@ class DatabaseManager:
         """Initialize all database tables"""
         with self.get_connection() as conn:
             cursor = conn.cursor()
+            # Users table
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS users (
+                    user_id INTEGER PRIMARY KEY,
+                    username TEXT,
+                    first_name TEXT,
+                    full_name TEXT,
+                    email TEXT,
+                    registration_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    strategy TEXT,
+                    total_invested REAL DEFAULT 0,
+                    current_balance REAL DEFAULT 0,
+                    profit_earned REAL DEFAULT 0,
+                    last_profit_update TIMESTAMP,
+                    referral_code TEXT UNIQUE,
+                    referred_by INTEGER,
+                    wallet_address TEXT,
+                    FOREIGN KEY (referred_by) REFERENCES users (user_id)
+                )
+            ''')
             
             # Users table (Upgraded: 'plan' -> 'strategy')
             cursor.execute('''
