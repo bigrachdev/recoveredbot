@@ -5,7 +5,7 @@ import logging
 import qrcode
 from io import BytesIO
 import requests
-from tkinter.constants import PAGES
+from constants import PAGES
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes
 import yfinance as yf
