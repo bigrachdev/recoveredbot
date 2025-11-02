@@ -1255,6 +1255,21 @@ async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 def main():
     """Start the enhanced support bot"""
+
+    try:
+        from health_server import start_health_server
+        start_health_server()
+        logger.info("Health check server started for Render")
+    except Exception as e:
+        logger.warning(f"Could not start health server: {e}")
+    # Create custom request with timeout settings
+    request = HTTPXRequest(
+        connect_timeout=30.0,
+        read_timeout=30.0,
+        write_timeout=30.0,
+        pool_timeout=30.0
+    )
+    
     if not SUPPORT_BOT_TOKEN:
         print("❌ Error: SUPPORT_BOT_TOKEN is not set!")
         return
