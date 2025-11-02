@@ -122,6 +122,15 @@ def main():
         logger.info("Health check server started for Render")
     except Exception as e:
         logger.warning(f"Could not start health server: {e}")
+
+     # ✅ ADD THIS - Start keep-alive pinger
+    try:
+        from keep_alive import start_keep_alive
+        start_keep_alive()
+        logger.info("Keep-alive system started")
+    except Exception as e:
+        logger.warning(f"Could not start keep-alive: {e}")
+    
     # Create custom request with timeout settings
     request = HTTPXRequest(
         connect_timeout=30.0,
