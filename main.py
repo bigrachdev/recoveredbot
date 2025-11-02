@@ -115,6 +115,13 @@ async def clear_inactive_chats_job(context):
                       
 def main():
     """Start the bot"""
+
+    try:
+        from health_server import start_health_server
+        start_health_server()
+        logger.info("Health check server started for Render")
+    except Exception as e:
+        logger.warning(f"Could not start health server: {e}")
     # Create custom request with timeout settings
     request = HTTPXRequest(
         connect_timeout=30.0,
