@@ -1,5 +1,5 @@
 """
-Database operations for the trading bot
+Database operations for the trading bot - COMPLETE FIXED VERSION
 """
 import sqlite3
 import logging
@@ -26,13 +26,11 @@ class DatabaseManager:
         finally:
             conn.close()
     
-    
-        
-        # In database.py (upgrade init_database to add real leaderboard table)
     def init_database(self):
         """Initialize all database tables"""
         with self.get_connection() as conn:
             cursor = conn.cursor()
+            
             # Users table
             cursor.execute('''
                 CREATE TABLE IF NOT EXISTS users (
@@ -54,7 +52,7 @@ class DatabaseManager:
                 )
             ''')
             
-            # Users table (Upgraded: 'plan' -> 'strategy')
+            # Message log table
             cursor.execute('''
                 CREATE TABLE IF NOT EXISTS message_log (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -69,7 +67,7 @@ class DatabaseManager:
                 )
             ''')
             
-            # Investments table (Upgraded: 'plan' -> 'strategy')
+            # Investments table
             cursor.execute('''
                 CREATE TABLE IF NOT EXISTS investments (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -130,7 +128,7 @@ class DatabaseManager:
                 )
             ''')
             
-            # Real leaderboard table (materialized view-like, updated via job)
+            # Leaderboard table
             cursor.execute('''
                 CREATE TABLE IF NOT EXISTS leaderboard (
                     user_id INTEGER PRIMARY KEY,
@@ -142,46 +140,22 @@ class DatabaseManager:
                 )
             ''')
             
-            cursor.execute('''
-                CREATE TABLE IF NOT EXISTS message_log (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    chat_id INTEGER,
-                    message_id INTEGER,
-                    user_id INTEGER,
-                    message_type TEXT,
-                    is_main_menu INTEGER DEFAULT 0,
-                    deleted INTEGER DEFAULT 0,
-                    sent_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                )
-            ''')
-
-            cursor.execute('''
-                CREATE TABLE IF NOT EXISTS message_log (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    chat_id INTEGER,
-                    message_id INTEGER,
-                    user_id INTEGER,
-                    message_type TEXT DEFAULT 'bot_message',
-                    is_main_menu BOOLEAN DEFAULT 0,
-                    deleted BOOLEAN DEFAULT 0,
-                    sent_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    delete_after_hours INTEGER DEFAULT 2
-                )
-            ''')
             conn.commit()
         
-        # Add index for performance
+        # Add indexes for performance
         with self.get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute('CREATE INDEX IF NOT EXISTS idx_leaderboard_profit ON leaderboard(profit_earned DESC)')
+            cursor.execute('CREATE INDEX IF NOT EXISTS idx_investments_user ON investments(user_id)')
+            cursor.execute('CREATE INDEX IF NOT EXISTS idx_withdrawals_user ON withdrawals(user_id)')
             conn.commit()
-            
-                
+    
     def ensure_admin_tables(self):
         """Ensure admin-related tables exist"""
         with self.get_connection() as conn:
             cursor = conn.cursor()
-            
+            conn.commit()
+    
     def get_user(self, user_id: int) -> Optional[Tuple]:
         """Get user data by ID"""
         with self.get_connection() as conn:
@@ -196,7 +170,6 @@ class DatabaseManager:
             with self.get_connection() as conn:
                 cursor = conn.cursor()
                 
-                # Check if user exists
                 cursor.execute('SELECT user_id FROM users WHERE user_id = ?', (user_id,))
                 user_exists = cursor.fetchone()
                 
@@ -213,7 +186,6 @@ class DatabaseManager:
                         VALUES (?, ?, ?, ?, ?, ?, ?)
                     ''', (user_id, username, first_name, full_name, email, referral_code, referred_by_id))
                     
-                    # Add referral record if referred
                     if referred_by_id:
                         cursor.execute('''
                             INSERT INTO referrals (referrer_id, referred_id) VALUES (?, ?)
@@ -225,9 +197,8 @@ class DatabaseManager:
             logging.error(f"Error creating/updating user {user_id}: {e}")
             return False
     
-    # BEFORE:
     def add_investment(self, user_id: int, amount: float, crypto_type: str, 
-                  wallet_address: str, transaction_id: str, strategy: str, notes: str = None) -> bool:
+                      wallet_address: str, transaction_id: str, strategy: str, notes: str = None) -> bool:
         """Add new investment record"""
         try:
             with self.get_connection() as conn:
@@ -243,12 +214,11 @@ class DatabaseManager:
             return False
     
     def confirm_investment(self, investment_id: int, admin_id: int) -> bool:
-        """Confirm a pending investment and process referral bonus (Upgraded: 'plan' -> 'strategy')"""
+        """Confirm a pending investment and process referral bonus"""
         try:
             with self.get_connection() as conn:
                 cursor = conn.cursor()
                 
-                # Get investment details (Upgraded: 'plan' -> 'strategy')
                 cursor.execute('''
                     SELECT user_id, amount, strategy FROM investments 
                     WHERE id = ? AND status = 'pending'
@@ -260,7 +230,6 @@ class DatabaseManager:
                 
                 user_id, amount, strategy = investment
                 
-                # Check if this is first confirmed investment
                 cursor.execute('''
                     SELECT COUNT(*) FROM investments 
                     WHERE user_id = ? AND status = 'confirmed'
@@ -268,12 +237,10 @@ class DatabaseManager:
                 previous_investments = cursor.fetchone()[0]
                 is_first_investment = (previous_investments == 0)
                 
-                # Update investment status
                 cursor.execute('''
                     UPDATE investments SET status = 'confirmed' WHERE id = ?
                 ''', (investment_id,))
                 
-                # Update user balance and strategy (Upgraded: 'plan' -> 'strategy')
                 cursor.execute('''
                     UPDATE users 
                     SET total_invested = total_invested + ?, 
@@ -283,26 +250,20 @@ class DatabaseManager:
                     WHERE user_id = ?
                 ''', (amount, amount, strategy, datetime.now().isoformat(), user_id))
                 
-                # Process referral bonus if first investment
                 if is_first_investment:
-                    # Check if user was referred
                     cursor.execute('SELECT referred_by FROM users WHERE user_id = ?', (user_id,))
                     result = cursor.fetchone()
                     
                     if result and result[0]:
                         referrer_id = result[0]
-                        
-                        # Calculate 5% bonus
                         bonus_amount = amount * 0.05
                         
-                        # Update referral record
                         cursor.execute('''
                             UPDATE referrals 
                             SET bonus_amount = ?
                             WHERE referrer_id = ? AND referred_id = ?
                         ''', (bonus_amount, referrer_id, user_id))
                         
-                        # Credit referrer's balance
                         cursor.execute('SELECT current_balance FROM users WHERE user_id = ?', (referrer_id,))
                         referrer_balance = cursor.fetchone()
                         
@@ -316,13 +277,12 @@ class DatabaseManager:
                                 WHERE user_id = ?
                             ''', (new_balance, referrer_id))
                             
-                            # Log the bonus
                             cursor.execute('''
                                 INSERT INTO admin_balance_logs 
                                 (admin_id, target_user_id, action_type, amount, old_balance, new_balance, notes)
                                 VALUES (?, ?, ?, ?, ?, ?, ?)
                             ''', (
-                                0,  # System action
+                                0,
                                 referrer_id,
                                 'referral_bonus',
                                 bonus_amount,
@@ -371,7 +331,7 @@ class DatabaseManager:
             with self.get_connection() as conn:
                 cursor = conn.cursor()
                 cursor.execute('''
-                    SELECT w.id, w.user_id,   -- ✅ MAKE SURE w.id IS FIRST!
+                    SELECT w.id, w.user_id,
                         COALESCE(u.username, 'N/A') as username,
                         COALESCE(u.full_name, 'N/A') as full_name,
                         COALESCE(u.email, 'N/A') as email,
@@ -385,16 +345,15 @@ class DatabaseManager:
                 ''')
                 results = cursor.fetchall()
                 
-                # Debug: Log the results
                 logging.info(f"Found {len(results)} pending withdrawals")
                 for i, row in enumerate(results):
-                    logging.info(f"Withdrawal {i}: ID={row[0]}, User={row[1]}, Amount={row[5]}")  # ✅ row[0] should be withdrawal ID
+                    logging.info(f"Withdrawal {i}: ID={row[0]}, User={row[1]}, Amount={row[5]}")
                 
                 return results
         except Exception as e:
             logging.error(f"Error getting pending withdrawals: {e}")
             return []
-        
+    
     def get_user_stats(self) -> Dict[str, Any]:
         """Get overall user statistics"""
         with self.get_connection() as conn:
@@ -402,24 +361,18 @@ class DatabaseManager:
             
             stats = {}
             
-            # Total users
             cursor.execute('SELECT COUNT(*) FROM users')
             stats['total_users'] = cursor.fetchone()[0]
             
-            # Active investors
             cursor.execute('SELECT COUNT(*) FROM users WHERE total_invested > 0')
             stats['active_investors'] = cursor.fetchone()[0]
             
-            # Total investments
             cursor.execute('SELECT SUM(total_invested) FROM users')
             stats['total_crypto_invested'] = cursor.fetchone()[0] or 0
             
-            
-            # Total balances
             cursor.execute('SELECT SUM(current_balance) FROM users')
             stats['total_balances'] = cursor.fetchone()[0] or 0
             
-            # Pending items
             cursor.execute('SELECT COUNT(*) FROM investments WHERE status = "pending"')
             stats['pending_investments'] = cursor.fetchone()[0]
             
@@ -427,7 +380,6 @@ class DatabaseManager:
             stats['pending_withdrawals'] = cursor.fetchone()[0]
             
             return stats
-    
     
     def log_message(self, chat_id, message_id, user_id=None, message_type='bot_message', is_main_menu=False):
         """Log a message for auto-deletion"""
@@ -456,7 +408,7 @@ class DatabaseManager:
                   AND is_main_menu = 0
                   AND datetime(sent_date, '+' || delete_after_hours || ' hours') <= datetime('now')
                 LIMIT 100
-            ''', ())
+            ''')
             return cursor.fetchall()
     
     def mark_message_deleted(self, log_id: int) -> bool:
@@ -472,8 +424,8 @@ class DatabaseManager:
         except Exception as e:
             logging.error(f"Error marking message deleted: {e}")
             return False
-
-def get_inactive_users(self, hours=1):
+    
+    def get_inactive_users(self, hours=1):
         """Get users with no activity in specified hours"""
         with self.get_connection() as conn:
             cursor = conn.cursor()
@@ -483,21 +435,21 @@ def get_inactive_users(self, hours=1):
                 AND is_main_menu = 0
             ''', (hours,))
             return [row[0] for row in cursor.fetchall()]
+    
+    def debug_get_all_withdrawals(self):
+        """Debug function to see all withdrawals"""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute('''
+                    SELECT id, user_id, amount, status, withdrawal_date 
+                    FROM withdrawals 
+                    ORDER BY withdrawal_date DESC
+                ''')
+                return cursor.fetchall()
+        except Exception as e:
+            logging.error(f"Error getting all withdrawals: {e}")
+            return []
 
-# Temporary debug function - add this to your database.py
-def debug_get_all_withdrawals(self):
-    """Debug function to see all withdrawals"""
-    try:
-        with self.get_connection() as conn:
-            cursor = conn.cursor()
-            cursor.execute('''
-                SELECT id, user_id, amount, status, withdrawal_date 
-                FROM withdrawals 
-                ORDER BY withdrawal_date DESC
-            ''')
-            return cursor.fetchall()
-    except Exception as e:
-        logging.error(f"Error getting all withdrawals: {e}")
-        return []
 # Global database instance
 db = DatabaseManager()
