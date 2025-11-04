@@ -92,6 +92,8 @@ async def handle_admin_callback(update: Update, context: ContextTypes.DEFAULT_TY
         await admin_command(update, context)
     elif data == "admin_investments":
         await show_pending_investments(update, context)
+    elif data == "admin_withdrawals":
+        await show_pending_withdrawals(update, context)
    # SPECIFIC WITHDRAWAL BRANCHES FIRST
     elif data.startswith("admin_confirm_withdrawal_"):
         withdrawal_id = int(data.split("_")[-1])
@@ -449,7 +451,6 @@ async def handle_individual_edit_callback(update: Update, context: ContextTypes.
         inv_id = int(parts[-1])
         await setup_investment_plan_edit(update, context, inv_id)
 
-# --- STUBS FOR MISSING FUNCTIONS ---
 async def show_user_edit_profile_menu(update: Update, context: ContextTypes.DEFAULT_TYPE, user_id: int):
     """Show menu for editing user profile fields"""
     user_data = db.get_user(user_id)

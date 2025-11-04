@@ -370,10 +370,15 @@ Enter amount below:
     await update.callback_query.message.edit_text(text.strip(), reply_markup=reply_markup, parse_mode='HTML')
 
 async def handle_crypto_selection(update: Update, context: ContextTypes.DEFAULT_TYPE, data: str):
-    """Handle cryptocurrency selection with QR code and converted amount"""
+    """Handle cryptocurrency selection with QR code and converted amount - USDT ONLY"""
     parts = data.split("_")
     crypto = parts[1]
     amount = float(parts[2])  # Get amount from callback data
+    
+    # Only allow USDT
+    if crypto != 'usdt':
+        await update.callback_query.message.edit_text("❌ Only USDT (TRC20) is currently supported.")
+        return
     
     strategy_data = context.user_data.get('selected_strategy')
     if not strategy_data:
@@ -382,15 +387,13 @@ async def handle_crypto_selection(update: Update, context: ContextTypes.DEFAULT_
     
     strategy_info = strategy_data['info']
     
-    # Get current crypto price
-    crypto_amount, usd_rate = await get_crypto_conversion(crypto, amount)
-    if not crypto_amount:
-        await update.callback_query.message.edit_text("❌ Error fetching current prices. Please try again.")
-        return
+    # USDT is always 1:1
+    crypto_amount = amount
+    usd_rate = 1.0
     
     wallet_address = get_random_wallet(crypto)
     if not wallet_address:
-        await update.callback_query.message.edit_text("❌ Invalid cryptocurrency selected.")
+        await update.callback_query.message.edit_text("❌ Wallet address not available. Please try again.")
         return
     
     # Generate QR code
@@ -418,10 +421,8 @@ async def handle_crypto_selection(update: Update, context: ContextTypes.DEFAULT_
 
 🎯 Strategy: {strategy_info['name']}
 💰 Amount: ${amount:,.2f} USD
-💎 Payment: {crypto.upper()}
-💵 Crypto Amount: {crypto_amount:.8f} {crypto.upper()}
-
-📊 Rate: 1 {crypto.upper()} = ${usd_rate:,.2f} USD
+💎 Payment: USDT (TRC20)
+💵 USDT Amount: {crypto_amount:,.2f} USDT
 
 🔐 PAYMENT DETAILS:
 
@@ -431,8 +432,8 @@ Wallet Address:
 `{wallet_address}`
 
 ⚠️ IMPORTANT:
-• Send EXACTLY {crypto_amount:.8f} {crypto.upper()}
-• Network: {get_network_name(crypto)}
+• Send EXACTLY {crypto_amount:,.2f} USDT
+• Network: TRC20 ONLY
 • Include sufficient network fees
 • Payment will be verified & confirmed
 
@@ -448,51 +449,29 @@ Wallet Address:
     )
 
 async def get_crypto_conversion(crypto: str, usd_amount: float) -> tuple:
-    """Get current crypto price and convert USD amount to crypto"""
+    """Get current crypto price and convert USD amount to crypto - USDT ONLY"""
     try:
-        # Map crypto symbols to API symbols
-        symbol_map = {
-            'btc': 'bitcoin',
-            'eth': 'ethereum', 
-            'usdt': 'tether',
-            'sol': 'solana',
-            'ton': 'toncoin'
-        }
-        
-        api_symbol = symbol_map.get(crypto)
-        if not api_symbol:
+        # USDT is always 1:1 with USD
+        if crypto == 'usdt':
+            return usd_amount, 1.0
+        else:
+            # Only USDT is supported now
             return None, None
             
-        # Use CoinGecko API for prices
-        url = f"https://api.coingecko.com/api/v3/simple/price?ids={api_symbol}&vs_currencies=usd"
-        response = requests.get(url, timeout=10)
-        data = response.json()
-        
-        if api_symbol in data and 'usd' in data[api_symbol]:
-            usd_rate = data[api_symbol]['usd']
-            crypto_amount = usd_amount / usd_rate
-            return crypto_amount, usd_rate
-            
     except Exception as e:
-        logging.error(f"Error fetching crypto price: {e}")
+        logging.error(f"Error in crypto conversion: {e}")
     
     return None, None
 
 async def generate_qr_code(address: str, crypto: str, amount: float) -> str:
-    """Generate QR code for crypto payment"""
+    """Generate QR code for crypto payment - USDT ONLY"""
     try:
-        # Create payment URI based on cryptocurrency
-        if crypto == 'btc':
-            payment_uri = f"bitcoin:{address}?amount={amount}"
-        elif crypto == 'eth':
-            payment_uri = f"ethereum:{address}?value={amount}"
-        elif crypto == 'usdt':
+        # Create payment URI for USDT TRC20
+        if crypto == 'usdt':
+            # USDT TRC20 payment URI
             payment_uri = f"tether:{address}?amount={amount}"
-        elif crypto == 'sol':
-            payment_uri = f"solana:{address}?amount={amount}"
-        elif crypto == 'ton':
-            payment_uri = f"ton:{address}?amount={amount}"
         else:
+            # Only USDT supported
             payment_uri = address
         
         # Generate QR code
@@ -517,15 +496,11 @@ async def generate_qr_code(address: str, crypto: str, amount: float) -> str:
     except Exception as e:
         logging.error(f"Error generating QR code: {e}")
         return None
-
+    
 def get_network_name(crypto: str) -> str:
     """Get network name for cryptocurrency"""
     networks = {
-        'btc': 'Bitcoin',
-        'eth': 'Ethereum (ERC20)',
-        'usdt': 'TRON (TRC20)',
-        'sol': 'Solana',
-        'ton': 'TON'
+        'usdt': 'TRON (TRC20)'
     }
     return networks.get(crypto, crypto.upper())
 

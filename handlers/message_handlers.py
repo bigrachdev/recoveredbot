@@ -154,13 +154,9 @@ async def handle_investment_amount(update: Update, context: ContextTypes.DEFAULT
         context.user_data['investment_amount'] = amount
         context.user_data.pop('awaiting_investment_amount', None)
         
-        # Show cryptocurrency options
+        # Show only USDT option
         keyboard = [
-            [InlineKeyboardButton("₿ Bitcoin (BTC)", callback_data=f"crypto_btc_{amount}")],
-            [InlineKeyboardButton("💎 Ethereum (ETH)", callback_data=f"crypto_eth_{amount}")],
             [InlineKeyboardButton("💵 USDT (TRC20)", callback_data=f"crypto_usdt_{amount}")],
-            [InlineKeyboardButton("☀️ Solana (SOL)", callback_data=f"crypto_sol_{amount}")],
-            [InlineKeyboardButton("💙 TON", callback_data=f"crypto_ton_{amount}")],
             [InlineKeyboardButton("🔙 Change Amount", callback_data=f"strategy_select_{strategy_data['type']}")]
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
@@ -172,14 +168,13 @@ async def handle_investment_amount(update: Update, context: ContextTypes.DEFAULT
 💵 Amount: ${amount:,.2f} USD
 📈 Daily Return: {strategy_info['expected_daily_return'] * 100:.2f}%
 
-💎 Select your payment cryptocurrency:
+💎 Payment Method: USDT (TRC20)
 
-Each option shows:
-• Exact amount in selected crypto
+• Exact amount in USDT
 • QR code for easy payment
 • Wallet address for manual transfer
 
-Choose payment method below: 👇
+Click below to get payment details: 👇
         """
         
         await update.message.reply_text(text.strip(), reply_markup=reply_markup, parse_mode='HTML')
