@@ -56,7 +56,18 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
     
     data = query.data
     user = query.from_user
-
+    
+    if data == "cancel_invoice":
+        # Clear investment data
+        context.user_data.pop('awaiting_tx_details', None)
+        context.user_data.pop('selected_strategy', None)
+        context.user_data.pop('investment_amount', None)
+        
+        # Delete the invoice message
+        await query.message.delete()
+        
+        await show_invest_menu(update, context)
+        return
     if data in ["invest_menu", "main_menu", "settings_cancel_edit", "withdraw"]:
         # Clear ALL awaiting states
         for key in ['awaiting_settings_edit', 'awaiting_investment_amount', 
@@ -371,18 +382,21 @@ Enter amount below:
 
 async def handle_crypto_selection(update: Update, context: ContextTypes.DEFAULT_TYPE, data: str):
     """Handle cryptocurrency selection with QR code and converted amount - USDT ONLY"""
+    query = update.callback_query
+    await query.answer()
+    
     parts = data.split("_")
     crypto = parts[1]
     amount = float(parts[2])  # Get amount from callback data
     
     # Only allow USDT
     if crypto != 'usdt':
-        await update.callback_query.message.edit_text("❌ Only USDT (TRC20) is currently supported.")
+        await query.message.edit_text("❌ Only USDT (TRC20) is currently supported.")
         return
     
     strategy_data = context.user_data.get('selected_strategy')
     if not strategy_data:
-        await update.callback_query.message.edit_text("❌ Strategy session expired. Please start over.")
+        await query.message.edit_text("❌ Strategy session expired. Please start over.")
         return
     
     strategy_info = strategy_data['info']
@@ -393,7 +407,7 @@ async def handle_crypto_selection(update: Update, context: ContextTypes.DEFAULT_
     
     wallet_address = get_random_wallet(crypto)
     if not wallet_address:
-        await update.callback_query.message.edit_text("❌ Wallet address not available. Please try again.")
+        await query.message.edit_text("❌ Wallet address not available. Please try again.")
         return
     
     # Generate QR code
@@ -405,14 +419,14 @@ async def handle_crypto_selection(update: Update, context: ContextTypes.DEFAULT_
         'strategy_info': strategy_info,
         'crypto': crypto,
         'wallet_address': wallet_address,
-        'user_id': update.callback_query.from_user.id,
+        'user_id': query.from_user.id,
         'amount': amount,
         'crypto_amount': crypto_amount
     }
     
     keyboard = [
         [InlineKeyboardButton("✅ I've Sent Payment", callback_data="confirm_payment")],
-        [InlineKeyboardButton("❌ Cancel", callback_data="invest_menu")]
+        [InlineKeyboardButton("❌ Cancel", callback_data="cancel_invoice")]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
     
@@ -441,12 +455,15 @@ Wallet Address:
     """
     
     # Send QR code image with invoice
-    await update.callback_query.message.reply_photo(
+    await query.message.reply_photo(
         photo=qr_code_url,
         caption=text.strip(),
         reply_markup=reply_markup,
         parse_mode='HTML'
     )
+
+    # Delete the previous message (the one with the crypto selection buttons)
+    await query.message.delete()
 
 async def get_crypto_conversion(crypto: str, usd_amount: float) -> tuple:
     """Get current crypto price and convert USD amount to crypto - USDT ONLY"""

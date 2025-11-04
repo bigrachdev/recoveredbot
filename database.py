@@ -1,30 +1,54 @@
 """
 Database operations for the trading bot - COMPLETE FIXED VERSION
 """
-import sqlite3
+import os
 import logging
+import psycopg2
+from psycopg2.extras import RealDictCursor
 from datetime import datetime
 from typing import Optional, List, Tuple, Dict, Any
 from contextlib import contextmanager
 
 class DatabaseManager:
-    def __init__(self, db_path: str = 'trading_bot.db'):
-        self.db_path = db_path
+    def __init__(self):
+        # Get database URL from Render environment variable
+        self.database_url = os.environ.get('DATABASE_URL')
+        if not self.database_url:
+            logging.warning("DATABASE_URL not found. Using SQLite for local development.")
+            self.use_postgres = False
+            self.db_path = 'trading_bot.db'
+        else:
+            self.use_postgres = True
+            logging.info("Using PostgreSQL database")
+        
         self.init_database()
-        self.ensure_admin_tables()
         
     @contextmanager
     def get_connection(self):
         """Context manager for database connections"""
-        conn = sqlite3.connect(self.db_path)
-        try:
-            yield conn
-        except Exception as e:
-            conn.rollback()
-            logging.error(f"Database error: {e}")
-            raise
-        finally:
-            conn.close()
+        if self.use_postgres:
+            # PostgreSQL connection
+            conn = psycopg2.connect(self.database_url, sslmode='require')
+            try:
+                yield conn
+            except Exception as e:
+                conn.rollback()
+                logging.error(f"PostgreSQL error: {e}")
+                raise
+            finally:
+                conn.close()
+        else:
+            # SQLite connection (for local development)
+            import sqlite3
+            conn = sqlite3.connect(self.db_path)
+            try:
+                yield conn
+            except Exception as e:
+                conn.rollback()
+                logging.error(f"SQLite error: {e}")
+                raise
+            finally:
+                conn.close()
     
     def init_database(self):
         """Initialize all database tables"""
@@ -32,135 +56,248 @@ class DatabaseManager:
             cursor = conn.cursor()
             
             # Users table
-            cursor.execute('''
-                CREATE TABLE IF NOT EXISTS users (
-                    user_id INTEGER PRIMARY KEY,
-                    username TEXT,
-                    first_name TEXT,
-                    full_name TEXT,
-                    email TEXT,
-                    registration_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    strategy TEXT,
-                    total_invested REAL DEFAULT 0,
-                    current_balance REAL DEFAULT 0,
-                    profit_earned REAL DEFAULT 0,
-                    last_profit_update TIMESTAMP,
-                    referral_code TEXT UNIQUE,
-                    referred_by INTEGER,
-                    wallet_address TEXT,
-                    FOREIGN KEY (referred_by) REFERENCES users (user_id)
-                )
-            ''')
+            if self.use_postgres:
+                cursor.execute('''
+                    CREATE TABLE IF NOT EXISTS users (
+                        user_id BIGINT PRIMARY KEY,
+                        username VARCHAR(255),
+                        first_name VARCHAR(255),
+                        full_name VARCHAR(255),
+                        email VARCHAR(255),
+                        registration_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                        strategy VARCHAR(50),
+                        total_invested DECIMAL(15, 2) DEFAULT 0,
+                        current_balance DECIMAL(15, 2) DEFAULT 0,
+                        profit_earned DECIMAL(15, 2) DEFAULT 0,
+                        last_profit_update TIMESTAMP,
+                        referral_code VARCHAR(50) UNIQUE,
+                        referred_by BIGINT,
+                        wallet_address TEXT
+                    )
+                ''')
+            else:
+                cursor.execute('''
+                    CREATE TABLE IF NOT EXISTS users (
+                        user_id INTEGER PRIMARY KEY,
+                        username TEXT,
+                        first_name TEXT,
+                        full_name TEXT,
+                        email TEXT,
+                        registration_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                        strategy TEXT,
+                        total_invested REAL DEFAULT 0,
+                        current_balance REAL DEFAULT 0,
+                        profit_earned REAL DEFAULT 0,
+                        last_profit_update TIMESTAMP,
+                        referral_code TEXT UNIQUE,
+                        referred_by INTEGER,
+                        wallet_address TEXT,
+                        FOREIGN KEY (referred_by) REFERENCES users (user_id)
+                    )
+                ''')
             
             # Message log table
-            cursor.execute('''
-                CREATE TABLE IF NOT EXISTS message_log (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    chat_id INTEGER,
-                    message_id INTEGER,
-                    user_id INTEGER,
-                    message_type TEXT DEFAULT 'bot_message',
-                    is_main_menu BOOLEAN DEFAULT 0,
-                    deleted BOOLEAN DEFAULT 0,
-                    sent_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    delete_after_hours INTEGER DEFAULT 2
-                )
-            ''')
+            if self.use_postgres:
+                cursor.execute('''
+                    CREATE TABLE IF NOT EXISTS message_log (
+                        id SERIAL PRIMARY KEY,
+                        chat_id BIGINT,
+                        message_id BIGINT,
+                        user_id BIGINT,
+                        message_type VARCHAR(50) DEFAULT 'bot_message',
+                        is_main_menu BOOLEAN DEFAULT FALSE,
+                        deleted BOOLEAN DEFAULT FALSE,
+                        sent_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                        delete_after_hours INTEGER DEFAULT 2
+                    )
+                ''')
+            else:
+                cursor.execute('''
+                    CREATE TABLE IF NOT EXISTS message_log (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        chat_id INTEGER,
+                        message_id INTEGER,
+                        user_id INTEGER,
+                        message_type TEXT DEFAULT 'bot_message',
+                        is_main_menu BOOLEAN DEFAULT 0,
+                        deleted BOOLEAN DEFAULT 0,
+                        sent_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                        delete_after_hours INTEGER DEFAULT 2
+                    )
+                ''')
             
             # Investments table
-            cursor.execute('''
-                CREATE TABLE IF NOT EXISTS investments (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    user_id INTEGER,
-                    amount REAL,
-                    crypto_type TEXT,
-                    wallet_address TEXT,
-                    transaction_id TEXT,
-                    investment_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    status TEXT DEFAULT 'pending',
-                    strategy TEXT,
-                    notes TEXT,
-                    FOREIGN KEY (user_id) REFERENCES users (user_id)
-                )
-            ''')
+            if self.use_postgres:
+                cursor.execute('''
+                    CREATE TABLE IF NOT EXISTS investments (
+                        id SERIAL PRIMARY KEY,
+                        user_id BIGINT,
+                        amount DECIMAL(15, 2),
+                        crypto_type VARCHAR(20),
+                        wallet_address TEXT,
+                        transaction_id TEXT,
+                        investment_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                        status VARCHAR(20) DEFAULT 'pending',
+                        strategy VARCHAR(50),
+                        notes TEXT
+                    )
+                ''')
+            else:
+                cursor.execute('''
+                    CREATE TABLE IF NOT EXISTS investments (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        user_id INTEGER,
+                        amount REAL,
+                        crypto_type TEXT,
+                        wallet_address TEXT,
+                        transaction_id TEXT,
+                        investment_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                        status TEXT DEFAULT 'pending',
+                        strategy TEXT,
+                        notes TEXT,
+                        FOREIGN KEY (user_id) REFERENCES users (user_id)
+                    )
+                ''')
             
             # Withdrawals table
-            cursor.execute('''
-                CREATE TABLE IF NOT EXISTS withdrawals (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    user_id INTEGER,
-                    amount REAL,
-                    wallet_address TEXT,
-                    withdrawal_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    status TEXT DEFAULT 'pending',
-                    processed_by INTEGER,
-                    FOREIGN KEY (user_id) REFERENCES users (user_id)
-                )
-            ''')
+            if self.use_postgres:
+                cursor.execute('''
+                    CREATE TABLE IF NOT EXISTS withdrawals (
+                        id SERIAL PRIMARY KEY,
+                        user_id BIGINT,
+                        amount DECIMAL(15, 2),
+                        wallet_address TEXT,
+                        withdrawal_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                        status VARCHAR(20) DEFAULT 'pending',
+                        processed_by BIGINT
+                    )
+                ''')
+            else:
+                cursor.execute('''
+                    CREATE TABLE IF NOT EXISTS withdrawals (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        user_id INTEGER,
+                        amount REAL,
+                        wallet_address TEXT,
+                        withdrawal_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                        status TEXT DEFAULT 'pending',
+                        processed_by INTEGER,
+                        FOREIGN KEY (user_id) REFERENCES users (user_id)
+                    )
+                ''')
             
             # Referrals table
-            cursor.execute('''
-                CREATE TABLE IF NOT EXISTS referrals (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    referrer_id INTEGER,
-                    referred_id INTEGER,
-                    referral_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    bonus_amount REAL DEFAULT 0,
-                    FOREIGN KEY (referrer_id) REFERENCES users (user_id),
-                    FOREIGN KEY (referred_id) REFERENCES users (user_id)
-                )
-            ''')
+            if self.use_postgres:
+                cursor.execute('''
+                    CREATE TABLE IF NOT EXISTS referrals (
+                        id SERIAL PRIMARY KEY,
+                        referrer_id BIGINT,
+                        referred_id BIGINT,
+                        referral_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                        bonus_amount DECIMAL(15, 2) DEFAULT 0
+                    )
+                ''')
+            else:
+                cursor.execute('''
+                    CREATE TABLE IF NOT EXISTS referrals (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        referrer_id INTEGER,
+                        referred_id INTEGER,
+                        referral_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                        bonus_amount REAL DEFAULT 0,
+                        FOREIGN KEY (referrer_id) REFERENCES users (user_id),
+                        FOREIGN KEY (referred_id) REFERENCES users (user_id)
+                    )
+                ''')
             
             # Admin logs table
-            cursor.execute('''
-                CREATE TABLE IF NOT EXISTS admin_balance_logs (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    admin_id INTEGER,
-                    target_user_id INTEGER,
-                    action_type TEXT,
-                    amount REAL,
-                    old_balance REAL,
-                    new_balance REAL,
-                    timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    notes TEXT,
-                    FOREIGN KEY (admin_id) REFERENCES users (user_id),
-                    FOREIGN KEY (target_user_id) REFERENCES users (user_id)
-                )
-            ''')
+            if self.use_postgres:
+                cursor.execute('''
+                    CREATE TABLE IF NOT EXISTS admin_balance_logs (
+                        id SERIAL PRIMARY KEY,
+                        admin_id BIGINT,
+                        target_user_id BIGINT,
+                        action_type VARCHAR(50),
+                        amount DECIMAL(15, 2),
+                        old_balance DECIMAL(15, 2),
+                        new_balance DECIMAL(15, 2),
+                        timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                        notes TEXT
+                    )
+                ''')
+            else:
+                cursor.execute('''
+                    CREATE TABLE IF NOT EXISTS admin_balance_logs (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        admin_id INTEGER,
+                        target_user_id INTEGER,
+                        action_type TEXT,
+                        amount REAL,
+                        old_balance REAL,
+                        new_balance REAL,
+                        timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                        notes TEXT,
+                        FOREIGN KEY (admin_id) REFERENCES users (user_id),
+                        FOREIGN KEY (target_user_id) REFERENCES users (user_id)
+                    )
+                ''')
             
             # Leaderboard table
-            cursor.execute('''
-                CREATE TABLE IF NOT EXISTS leaderboard (
-                    user_id INTEGER PRIMARY KEY,
-                    username TEXT,
-                    profit_earned REAL DEFAULT 0,
-                    strategy TEXT,
-                    last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    FOREIGN KEY (user_id) REFERENCES users (user_id)
-                )
-            ''')
+            if self.use_postgres:
+                cursor.execute('''
+                    CREATE TABLE IF NOT EXISTS leaderboard (
+                        user_id BIGINT PRIMARY KEY,
+                        username VARCHAR(255),
+                        profit_earned DECIMAL(15, 2) DEFAULT 0,
+                        strategy VARCHAR(50),
+                        last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                    )
+                ''')
+            else:
+                cursor.execute('''
+                    CREATE TABLE IF NOT EXISTS leaderboard (
+                        user_id INTEGER PRIMARY KEY,
+                        username TEXT,
+                        profit_earned REAL DEFAULT 0,
+                        strategy TEXT,
+                        last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                        FOREIGN KEY (user_id) REFERENCES users (user_id)
+                    )
+                ''')
             
             conn.commit()
         
         # Add indexes for performance
         with self.get_connection() as conn:
             cursor = conn.cursor()
-            cursor.execute('CREATE INDEX IF NOT EXISTS idx_leaderboard_profit ON leaderboard(profit_earned DESC)')
-            cursor.execute('CREATE INDEX IF NOT EXISTS idx_investments_user ON investments(user_id)')
-            cursor.execute('CREATE INDEX IF NOT EXISTS idx_withdrawals_user ON withdrawals(user_id)')
+            if self.use_postgres:
+                cursor.execute('CREATE INDEX IF NOT EXISTS idx_leaderboard_profit ON leaderboard(profit_earned DESC)')
+                cursor.execute('CREATE INDEX IF NOT EXISTS idx_investments_user ON investments(user_id)')
+                cursor.execute('CREATE INDEX IF NOT EXISTS idx_withdrawals_user ON withdrawals(user_id)')
+            else:
+                cursor.execute('CREATE INDEX IF NOT EXISTS idx_leaderboard_profit ON leaderboard(profit_earned DESC)')
+                cursor.execute('CREATE INDEX IF NOT EXISTS idx_investments_user ON investments(user_id)')
+                cursor.execute('CREATE INDEX IF NOT EXISTS idx_withdrawals_user ON withdrawals(user_id)')
             conn.commit()
-    
-    def ensure_admin_tables(self):
-        """Ensure admin-related tables exist"""
-        with self.get_connection() as conn:
-            cursor = conn.cursor()
-            conn.commit()
+
+    def _format_query(self, query: str) -> str:
+        """Convert SQLite-style '?' placeholders to psycopg2 '%s' when using Postgres."""
+        if self.use_postgres:
+            return query.replace('?', '%s')
+        return query
+
+    def _execute(self, cursor, query: str, params: Tuple = None):
+        """Helper to execute queries with cross-db parameter placeholder handling."""
+        q = self._format_query(query)
+        if params is None:
+            return cursor.execute(q)
+        return cursor.execute(q, params)
     
     def get_user(self, user_id: int) -> Optional[Tuple]:
         """Get user data by ID"""
         with self.get_connection() as conn:
             cursor = conn.cursor()
-            cursor.execute('SELECT * FROM users WHERE user_id = ?', (user_id,))
+            self._execute(cursor, 'SELECT * FROM users WHERE user_id = ?', (user_id,))
             return cursor.fetchone()
     
     def create_or_update_user(self, user_id: int, username: str, first_name: str, 
@@ -170,26 +307,25 @@ class DatabaseManager:
             with self.get_connection() as conn:
                 cursor = conn.cursor()
                 
-                cursor.execute('SELECT user_id FROM users WHERE user_id = ?', (user_id,))
+                self._execute(cursor, 'SELECT user_id FROM users WHERE user_id = ?', (user_id,))
                 user_exists = cursor.fetchone()
                 
                 if user_exists:
-                    cursor.execute('''
-                        UPDATE users SET username = ?, first_name = ?, full_name = ?, email = ? 
-                        WHERE user_id = ?
-                    ''', (username, first_name, full_name, email, user_id))
+                    self._execute(cursor, '''
+                            UPDATE users SET username = ?, first_name = ?, full_name = ?, email = ? 
+                            WHERE user_id = ?
+                        ''', (username, first_name, full_name, email, user_id))
                 else:
                     import random
                     referral_code = f"AV{user_id}{random.randint(100, 999)}"
-                    cursor.execute('''
-                        INSERT INTO users (user_id, username, first_name, full_name, email, referral_code, referred_by)
-                        VALUES (?, ?, ?, ?, ?, ?, ?)
-                    ''', (user_id, username, first_name, full_name, email, referral_code, referred_by_id))
                     
+                    self._execute(cursor, '''
+                            INSERT INTO users (user_id, username, first_name, full_name, email, referral_code, referred_by)
+                            VALUES (?, ?, ?, ?, ?, ?, ?)
+                        ''', (user_id, username, first_name, full_name, email, referral_code, referred_by_id))
+
                     if referred_by_id:
-                        cursor.execute('''
-                            INSERT INTO referrals (referrer_id, referred_id) VALUES (?, ?)
-                        ''', (referred_by_id, user_id))
+                        self._execute(cursor, 'INSERT INTO referrals (referrer_id, referred_id) VALUES (?, ?)', (referred_by_id, user_id))
                 
                 conn.commit()
                 return True
@@ -203,7 +339,7 @@ class DatabaseManager:
         try:
             with self.get_connection() as conn:
                 cursor = conn.cursor()
-                cursor.execute('''
+                self._execute(cursor, '''
                     INSERT INTO investments (user_id, amount, crypto_type, wallet_address, transaction_id, strategy, notes)
                     VALUES (?, ?, ?, ?, ?, ?, ?)
                 ''', (user_id, amount, crypto_type, wallet_address, transaction_id, strategy, notes))
@@ -218,8 +354,8 @@ class DatabaseManager:
         try:
             with self.get_connection() as conn:
                 cursor = conn.cursor()
-                
-                cursor.execute('''
+
+                self._execute(cursor, '''
                     SELECT user_id, amount, strategy FROM investments 
                     WHERE id = ? AND status = 'pending'
                 ''', (investment_id,))
@@ -230,18 +366,18 @@ class DatabaseManager:
                 
                 user_id, amount, strategy = investment
                 
-                cursor.execute('''
+                self._execute(cursor, '''
                     SELECT COUNT(*) FROM investments 
                     WHERE user_id = ? AND status = 'confirmed'
                 ''', (user_id,))
                 previous_investments = cursor.fetchone()[0]
                 is_first_investment = (previous_investments == 0)
                 
-                cursor.execute('''
+                self._execute(cursor, '''
                     UPDATE investments SET status = 'confirmed' WHERE id = ?
                 ''', (investment_id,))
                 
-                cursor.execute('''
+                self._execute(cursor, '''
                     UPDATE users 
                     SET total_invested = total_invested + ?, 
                         current_balance = current_balance + ?,
@@ -251,33 +387,33 @@ class DatabaseManager:
                 ''', (amount, amount, strategy, datetime.now().isoformat(), user_id))
                 
                 if is_first_investment:
-                    cursor.execute('SELECT referred_by FROM users WHERE user_id = ?', (user_id,))
+                    self._execute(cursor, 'SELECT referred_by FROM users WHERE user_id = ?', (user_id,))
                     result = cursor.fetchone()
                     
                     if result and result[0]:
                         referrer_id = result[0]
                         bonus_amount = amount * 0.05
                         
-                        cursor.execute('''
+                        self._execute(cursor, '''
                             UPDATE referrals 
                             SET bonus_amount = ?
                             WHERE referrer_id = ? AND referred_id = ?
                         ''', (bonus_amount, referrer_id, user_id))
                         
-                        cursor.execute('SELECT current_balance FROM users WHERE user_id = ?', (referrer_id,))
+                        self._execute(cursor, 'SELECT current_balance FROM users WHERE user_id = ?', (referrer_id,))
                         referrer_balance = cursor.fetchone()
                         
                         if referrer_balance:
                             old_balance = referrer_balance[0]
                             new_balance = old_balance + bonus_amount
                             
-                            cursor.execute('''
+                            self._execute(cursor, '''
                                 UPDATE users 
                                 SET current_balance = ?
                                 WHERE user_id = ?
                             ''', (new_balance, referrer_id))
                             
-                            cursor.execute('''
+                            self._execute(cursor, '''
                                 INSERT INTO admin_balance_logs 
                                 (admin_id, target_user_id, action_type, amount, old_balance, new_balance, notes)
                                 VALUES (?, ?, ?, ?, ?, ?, ?)
@@ -305,7 +441,7 @@ class DatabaseManager:
         try:
             with self.get_connection() as conn:
                 cursor = conn.cursor()
-                cursor.execute('''
+                self._execute(cursor, '''
                     SELECT i.id, i.user_id, 
                         COALESCE(u.username, 'N/A') as username,
                         COALESCE(u.full_name, 'N/A') as full_name,
@@ -330,7 +466,7 @@ class DatabaseManager:
         try:
             with self.get_connection() as conn:
                 cursor = conn.cursor()
-                cursor.execute('''
+                self._execute(cursor, '''
                     SELECT w.id, w.user_id,
                         COALESCE(u.username, 'N/A') as username,
                         COALESCE(u.full_name, 'N/A') as full_name,
@@ -361,22 +497,23 @@ class DatabaseManager:
             
             stats = {}
             
-            cursor.execute('SELECT COUNT(*) FROM users')
+            self._execute(cursor, 'SELECT COUNT(*) FROM users')
             stats['total_users'] = cursor.fetchone()[0]
             
-            cursor.execute('SELECT COUNT(*) FROM users WHERE total_invested > 0')
+            self._execute(cursor, 'SELECT COUNT(*) FROM users WHERE total_invested > 0')
             stats['active_investors'] = cursor.fetchone()[0]
             
-            cursor.execute('SELECT SUM(total_invested) FROM users')
+            self._execute(cursor, 'SELECT SUM(total_invested) FROM users')
             stats['total_crypto_invested'] = cursor.fetchone()[0] or 0
             
-            cursor.execute('SELECT SUM(current_balance) FROM users')
+            self._execute(cursor, 'SELECT SUM(current_balance) FROM users')
             stats['total_balances'] = cursor.fetchone()[0] or 0
             
-            cursor.execute('SELECT COUNT(*) FROM investments WHERE status = "pending"')
+            # use parameter for status to be DB-agnostic
+            self._execute(cursor, 'SELECT COUNT(*) FROM investments WHERE status = ?', ('pending',))
             stats['pending_investments'] = cursor.fetchone()[0]
-            
-            cursor.execute('SELECT COUNT(*) FROM withdrawals WHERE status = "pending"')
+
+            self._execute(cursor, 'SELECT COUNT(*) FROM withdrawals WHERE status = ?', ('pending',))
             stats['pending_withdrawals'] = cursor.fetchone()[0]
             
             return stats
@@ -386,11 +523,18 @@ class DatabaseManager:
         try:
             with self.get_connection() as conn:
                 cursor = conn.cursor()
-                cursor.execute('''
-                    INSERT INTO message_log 
-                    (chat_id, message_id, user_id, message_type, is_main_menu, sent_date)
-                    VALUES (?, ?, ?, ?, ?, datetime('now'))
-                ''', (chat_id, message_id, user_id, message_type, 1 if is_main_menu else 0))
+                if self.use_postgres:
+                    self._execute(cursor, '''
+                        INSERT INTO message_log 
+                        (chat_id, message_id, user_id, message_type, is_main_menu, sent_date)
+                        VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                    ''', (chat_id, message_id, user_id, message_type, 1 if is_main_menu else 0))
+                else:
+                    self._execute(cursor, '''
+                        INSERT INTO message_log 
+                        (chat_id, message_id, user_id, message_type, is_main_menu, sent_date)
+                        VALUES (?, ?, ?, ?, ?, datetime('now'))
+                    ''', (chat_id, message_id, user_id, message_type, 1 if is_main_menu else 0))
                 conn.commit()
                 return True
         except Exception as e:
@@ -401,14 +545,25 @@ class DatabaseManager:
         """Get messages that should be deleted"""
         with self.get_connection() as conn:
             cursor = conn.cursor()
-            cursor.execute('''
-                SELECT id, chat_id, message_id
-                FROM message_log
-                WHERE deleted = 0 
-                  AND is_main_menu = 0
-                  AND datetime(sent_date, '+' || delete_after_hours || ' hours') <= datetime('now')
-                LIMIT 100
-            ''')
+            if self.use_postgres:
+                # Postgres: use interval arithmetic
+                self._execute(cursor, '''
+                    SELECT id, chat_id, message_id
+                    FROM message_log
+                    WHERE deleted = FALSE
+                      AND is_main_menu = FALSE
+                      AND (sent_date + delete_after_hours * INTERVAL '1 hour') <= NOW()
+                    LIMIT 100
+                ''')
+            else:
+                self._execute(cursor, '''
+                    SELECT id, chat_id, message_id
+                    FROM message_log
+                    WHERE deleted = 0 
+                      AND is_main_menu = 0
+                      AND datetime(sent_date, '+' || delete_after_hours || ' hours') <= datetime('now')
+                    LIMIT 100
+                ''')
             return cursor.fetchall()
     
     def mark_message_deleted(self, log_id: int) -> bool:
@@ -416,9 +571,11 @@ class DatabaseManager:
         try:
             with self.get_connection() as conn:
                 cursor = conn.cursor()
-                cursor.execute('''
-                    UPDATE message_log SET deleted = 1 WHERE id = ?
-                ''', (log_id,))
+                # Use DB-appropriate boolean/int for deleted
+                if self.use_postgres:
+                    self._execute(cursor, 'UPDATE message_log SET deleted = TRUE WHERE id = ?', (log_id,))
+                else:
+                    self._execute(cursor, 'UPDATE message_log SET deleted = 1 WHERE id = ?', (log_id,))
                 conn.commit()
                 return True
         except Exception as e:
@@ -429,11 +586,18 @@ class DatabaseManager:
         """Get users with no activity in specified hours"""
         with self.get_connection() as conn:
             cursor = conn.cursor()
-            cursor.execute('''
-                SELECT DISTINCT user_id FROM message_log 
-                WHERE datetime(sent_date, '+' || ? || ' hours') <= datetime('now')
-                AND is_main_menu = 0
-            ''', (hours,))
+            if self.use_postgres:
+                self._execute(cursor, '''
+                    SELECT DISTINCT user_id FROM message_log 
+                    WHERE (sent_date + %s * INTERVAL '1 hour') <= NOW()
+                    AND is_main_menu = FALSE
+                ''', (hours,))
+            else:
+                self._execute(cursor, '''
+                    SELECT DISTINCT user_id FROM message_log 
+                    WHERE datetime(sent_date, '+' || ? || ' hours') <= datetime('now')
+                    AND is_main_menu = 0
+                ''', (hours,))
             return [row[0] for row in cursor.fetchall()]
     
     def debug_get_all_withdrawals(self):
@@ -441,7 +605,7 @@ class DatabaseManager:
         try:
             with self.get_connection() as conn:
                 cursor = conn.cursor()
-                cursor.execute('''
+                self._execute(cursor, '''
                     SELECT id, user_id, amount, status, withdrawal_date 
                     FROM withdrawals 
                     ORDER BY withdrawal_date DESC
@@ -450,6 +614,6 @@ class DatabaseManager:
         except Exception as e:
             logging.error(f"Error getting all withdrawals: {e}")
             return []
-
+    
 # Global database instance
 db = DatabaseManager()

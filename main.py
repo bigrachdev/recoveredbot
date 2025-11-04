@@ -2,17 +2,20 @@
 Main bot application
 """
 import logging
+import os
 from datetime import time
 from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, filters
 from telegram.request import HTTPXRequest
-from database import db
+from database import db 
 from referral_system_audit import audit_referral_system, fix_referral_system
 from config import BOT_TOKEN, ADMIN_USER_IDS
 from handlers.user_handlers import start_command, portfolio_command, calculate_user_profits
 from handlers.admin_handlers import admin_command, confirm_investment_command, confirm_withdrawal_command
 from handlers.callback_handlers import handle_callback_query
 from handlers.message_handlers import handle_text_message
-
+import atexit
+import signal
+import sys
 
 # Configure logging
 logging.basicConfig(
@@ -112,10 +115,13 @@ async def clear_inactive_chats_job(context):
         
     except Exception as e:
         logging.error(f"Error in clear_inactive_chats_job: {e}")
-                      
+
+
 def main():
     """Start the bot"""
-
+    from database import db
+    print(f"Database path: {db.db_path}")
+    print(f"Database file exists: {os.path.exists(db.db_path)}")
     try:
         from health_server import start_health_server
         start_health_server()

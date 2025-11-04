@@ -1,5 +1,6 @@
 python-telegram-bot[job-queue]==20.7
 yfinance==0.2.18
+psycopg2-binary==2.9.7
 requests==2.31.0
 python-dotenv==1.0.0
 aiohttp==3.9.1
